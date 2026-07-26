@@ -34,6 +34,7 @@ clean: down
 fclean: clean
 	docker system prune -af --volumes
 	sudo rm -rf ${VOLUMES}
+	docker volume rf srcs_wp_volume srcs_db_volume 2>/dev/null || true
 
 re: fclean all
 
