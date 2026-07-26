@@ -6,10 +6,17 @@ DOCKER_COMPOSE_PATH = srcs/docker-compose.yml
 
 all: $(NAME)
 
-$(NAME):
+$(NAME): build up
+
+build:
 	mkdir -p /home/nnassiri/data/wp /home/nnassiri/data/db
 	docker compose -f ${DOCKER_COMPOSE_PATH} build
+
+up:
 	docker compose -f ${DOCKER_COMPOSE_PATH} up -d
+
+down:
+	docker compose -f ${DOCKER_COMPOSE_PATH} down
 
 state:
 	docker compose -f ${DOCKER_COMPOSE_PATH} ps
@@ -21,8 +28,8 @@ network:
 volumes:
 	docker volume ls
 
-clean:
-	docker compose -f ${DOCKER_COMPOSE_PATH} down
+clean: down
+	docker system prune -af
 
 fclean: clean
 	docker system prune -af --volumes
