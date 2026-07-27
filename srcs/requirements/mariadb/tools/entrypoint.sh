@@ -1,7 +1,7 @@
 #!/bin/bash
 
 mkdir -p /run/mysqld
-chown mysql:mysql /run/mysqld
+chown -R mysql:mysql /run/mysqld
 
 if [ ! -d "/var/lib/mysql/mysql" ]; then
     DB_PASSWORD=$(cat /run/secrets/db_password)

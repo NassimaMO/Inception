@@ -9,7 +9,7 @@ all: $(NAME)
 $(NAME): build up
 
 build:
-	mkdir -p /home/nnassiri/data/wp /home/nnassiri/data/db
+	mkdir -p ${VOLUMES}/wp ${VOLUMES}/db
 	docker compose -f ${DOCKER_COMPOSE_PATH} build
 
 up:
@@ -33,7 +33,9 @@ clean: down
 
 fclean: clean
 	docker system prune -af --volumes
-	sudo rm -rf ${VOLUMES}
+	rm -rf ${VOLUMES}/db
+	rm -rf ${VOLUMES}/wp
+	docker volume rm srcs_wp_volume srcs_db_volume
 	docker volume rf srcs_wp_volume srcs_db_volume 2>/dev/null || true
 
 re: fclean all
