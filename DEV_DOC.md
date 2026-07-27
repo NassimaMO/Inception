@@ -44,7 +44,9 @@ Everything goes through the `Makefile` at the repository root, which wraps Docke
 
 | Command | Effect |
 |---|---|
-| `make` / `make all` | Builds the 3 images and starts the stack (detached) |
+| `make` / `make all` | `build` + `up` |
+| `make build` | Builds the 3 images |
+| `make up` | Starts the stack |
 | `make state` | Shows container status (`docker compose ps`) |
 | `make network` | Lists Docker networks (`docker network ls`) |
 | `make volumes` | Lists Docker volumes (`docker volume ls`) |
@@ -53,7 +55,7 @@ Everything goes through the `Makefile` at the repository root, which wraps Docke
 | `make fclean` | `clean` + removes all images/volumes + wipes `/home/nnassiri/data/` |
 | `make re` | `fclean` + `make` — full rebuild from a clean state |
 
-`make re` is the command to use whenever you want to re-test the first-launch initialization logic (MariaDB table creation, WordPress install) — since that logic only runs when the bind-mounted data directories are empty.
+`make re` is the command to use whenever you want to re-test the first-launch initialization logic (MariaDB table creation, WordPress install).
 
 ## Managing containers and volumes
 

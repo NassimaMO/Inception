@@ -55,16 +55,8 @@ networks:
 volumes:
   wp_volume:
     driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /home/nnassiri/data/wp
   db_volume:
     driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: /home/nnassiri/data/db
 
 secrets:
   db_password:
