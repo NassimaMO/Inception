@@ -38,4 +38,4 @@ fclean: clean
 
 re: fclean all
 
-.PHONY: all clean fclean re state network volumes
+.PHONY: all clean fclean re build up down state network volumes
