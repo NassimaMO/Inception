@@ -4,9 +4,29 @@ This document explains how to set up, build, and manage the Inception stack from
 
 ## Prerequisites
 
-- A virtual machine running Debian or Alpine
+- A virtual machine running Debian
 - Docker and Docker Compose installed
-- The domain `nnassiri.42.fr` resolving to the VM's local IP address (added manually to `/etc/hosts` on the host you're testing from — this is outside Docker, a system-level step)
+- The domain `nnassiri.42.fr` resolving to the VM's local IP — add to `/etc/hosts` on your VM:
+
+```
+127.0.0.1    nnassiri.42.fr
+```
+
+- Docker configured to use `/home/nnassiri/data` as its data root — create or edit `/etc/docker/daemon.json`:
+
+```json
+{
+  "data-root": "/home/nnassiri/data"
+}
+```
+you must migrate the existing Docker data to the new location before restarting:
+```bash
+sudo systemctl stop docker
+sudo cp -rp /var/lib/docker/. /home/nnassiri/data/
+sudo systemctl start docker
+```
+
+This ensures named volumes are stored under `/home/nnassiri/data/volumes/` as required by the subject.
 
 ## Setting up the environment from scratch
 
@@ -23,15 +43,15 @@ MYSQL_USER=nassima_user
 WP_ADMIN_EMAIL=your.email@example.com
 ```
 
-**`secrets/`** — at the repository root, sensitive values, never read directly by Compose (mounted as files in containers):
+**`secrets/`** — at the repository root, sensitive values mounted as files inside containers:
 
 ```
 secrets/
 ├── db_password.txt          # password for MYSQL_USER
 ├── db_root_password.txt     # MariaDB root password
-└── credentials.txt          # WordPress account passwords, KEY=value format:
-                              #   ADMIN_PASSWORD=...
-                              #   REVIEWER_PASSWORD=...
+└── credentials.txt          # WordPress account passwords:
+                              #   ADMIN_PASSWORD=your_admin_password
+                              #   REVIEWER_PASSWORD=your_reviewer_password
 ```
 
 ### 2. Git ignore
@@ -55,7 +75,7 @@ Everything goes through the `Makefile` at the repository root, which wraps Docke
 | `make fclean` | `clean` + removes all images/volumes + wipes `/home/nnassiri/data/` |
 | `make re` | `fclean` + `make` — full rebuild from a clean state |
 
-`make re` is the command to use whenever you want to re-test the first-launch initialization logic (MariaDB table creation, WordPress install).
+Use `make re` to re-test first-launch initialization (MariaDB table creation, WordPress install) — the initialization only runs when the volumes are empty.
 
 ## Managing containers and volumes
 
@@ -78,13 +98,15 @@ When debugging a startup failure, check services in dependency order: **MariaDB 
 
 ## Where data is stored and how it persists
 
-Two services hold persistent state, via bind mounts to the host filesystem (as required by the subject, under `/home/nnassiri/data/`):
+Two services hold persistent state via named volumes managed by Docker:
 
-| Container | Mounted path (in container) | Host path | Contents |
-|---|---|---|---|
-| `mariadb` | `/var/lib/mysql` | `/home/nnassiri/data/db` | Database tables, system tables |
-| `wordpress` | `/var/www/html` | `/home/nnassiri/data/wp` | WordPress core files, themes, plugins, uploads |
+| Container | Path in container | Volume name | Host path (approximate) | Contents |
+|---|---|---|---|---|
+| `mariadb` | `/var/lib/mysql` | `srcs_db_volume` | `/home/nnassiri/data/volumes/srcs_db_volume/_data` | Database tables, system tables |
+| `wordpress` | `/var/www/html` | `srcs_wp_volume` | `/home/nnassiri/data/volumes/srcs_wp_volume/_data` | WordPress core files, themes, plugins, uploads |
 
-Both entrypoint scripts (`requirements/mariadb/tools/entrypoint.sh`, `requirements/wordpress/tools/entrypoint.sh`) check whether their respective data directory is already populated before running any initialization (`mysql_install_db`, `wp core install`, etc.). This makes the setup idempotent: on a fresh/empty volume, the full initialization runs once; on every subsequent container start, it's skipped and the actual service (`mysqld`, `php-fpm`) is launched directly — which is also why `make fclean` (wiping the host data directories) is required to force re-initialization during development.
+Both entrypoint scripts check whether their data is already present before running initialization. On a fresh empty volume, full initialization runs once and writes to the volume. On every subsequent start, initialization is skipped and the actual service (`mysqld`, `php-fpm`) launches directly as PID 1.
 
-NGINX does not persist any application data — it only holds its TLS certificate (generated at container startup, not bind-mounted) and reads its configuration from the image itself.
+NGINX does not persist application data — its TLS certificate is generated fresh at container startup and lives only inside the container filesystem.
+
+To force full re-initialization (e.g. to reset passwords or the WordPress install), run `make re` — this removes the volumes and rebuilds everything from scratch.

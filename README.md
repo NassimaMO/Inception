@@ -4,48 +4,60 @@
 
 ## Description
 
-Inception is a system administration project that consists of setting up a small web infrastructure entirely with Docker, inside a dedicated virtual machine. The goal is to deploy a WordPress website served over HTTPS, backed by a MariaDB database, with each service running in its own container, built from a custom Dockerfile (no pre-made images other than the Alpine/Debian base).
+Inception is a system administration project that consists of setting up a small web infrastructure entirely with Docker, inside a dedicated virtual machine. The goal is to deploy a WordPress website served over HTTPS, backed by a MariaDB database, with each service running in its own dedicated container built from a custom Dockerfile.
 
 The final stack is composed of three services:
 - **NGINX** — the single entry point of the infrastructure, serving HTTPS (TLSv1.2/1.3) on port 443.
-- **WordPress + php-fpm** — the application layer, executing the WordPress PHP code.
-- **MariaDB** — the database storing WordPress data.
+- **WordPress + php-fpm** — the application layer, executing WordPress PHP code via FastCGI on port 9000.
+- **MariaDB** — the database storing all WordPress data on port 3306.
 
-These services communicate over a dedicated Docker network, and persist their data through two volumes (database files and WordPress files).
+These services communicate over a dedicated Docker bridge network, and persist their data through two named volumes stored under `/home/nnassiri/data/` on the host machine.
 
 ## Instructions
 
 ### Requirements
 
-- A virtual machine (Linux, Debian or Alpine based)
+- A virtual machine running Debian
 - Docker and Docker Compose installed
 - The domain `nnassiri.42.fr` configured in `/etc/hosts` (or local DNS) to point to the VM's local IP address
+- Docker configured to use `/home/nnassiri/data` as its data root — create or edit `/etc/docker/daemon.json`:
+```json
+{
+  "data-root": "/home/nnassiri/data"
+}
+```
+you must migrate the existing Docker data to the new location before restarting:
+
+```bash
+sudo systemctl stop docker
+sudo cp -rp /var/lib/docker/. /home/nnassiri/data/
+sudo systemctl start docker
+```
 
 ### Setup
 
+Before the first build, create the following files — none are versioned in Git:
+
 ```
 secrets/
-├── db_password.txt
-|     XXXXXX
-├── db_root_password.txt
-|     XXXXXX
-└── credentials.txt
-      ADMIN_PASS=XXXXXX
-      REVIEWER_PASS=XXXXXX
-
+├── db_password.txt          # password for the WordPress DB user
+├── db_root_password.txt     # MariaDB root password
+└── credentials.txt          # WordPress account passwords:
+                              #   ADMIN_PASSWORD=your_admin_password
+                              #   REVIEWER_PASSWORD=your_reviewer_password
 
 srcs/.env
-      DOMAIN_NAME=nnassiri.42.fr
-      MYSQL_DB=XXXXXX
-      MYSQL_USER=XXXXXX
-      WP_ADMIN_EMAIL=XXXXXX
+  DOMAIN_NAME=nnassiri.42.fr
+  MYSQL_DB=wordpress
+  MYSQL_USER=nassima_user
+  WP_ADMIN_EMAIL=your@email.com
 ```
 
 ### Build & Run
 
 ```bash
 make          # builds the images and starts the stack
-make build    # build the images
+make build    # builds the images
 make up       # starts the stack
 ```
 
@@ -71,7 +83,9 @@ make re       # fclean + make
 - Website: `https://nnassiri.42.fr`
 - WordPress admin panel: `https://nnassiri.42.fr/wp-admin`
 
-TODO: confirm the exact admin path and the two configured user accounts.
+Two WordPress accounts are configured:
+- `nassima` — administrator (password in `secrets/credentials.txt` under `ADMIN_PASS`)
+- `reviewer` — author (password in `secrets/credentials.txt` under `REVIEWER_PASS`)
 
 ## Resources
 
@@ -107,28 +121,39 @@ TODO: confirm the exact admin path and the two configured user accounts.
                   ┌───────┴────────┐
             db volume          wp volume
         (/var/lib/mysql)   (/var/www/html)
+     → /home/nnassiri/data  → /home/nnassiri/data
 ```
+
+### Main design choices
+
+Each service has a `tools/entrypoint.sh` script that handles first-launch initialization before handing off to the actual service process as PID 1 via `exec "$@"`. This pattern ensures Docker can detect crashes and trigger `restart: always`, while keeping initialization logic clean and separate from the image build.
+
+**MariaDB**: the entrypoint runs `mysql_install_db`, starts a temporary `mysqld_safe` with `--skip-networking`, creates the database and users via SQL, flushes privileges, changes the root password, then shuts down cleanly before launching the real `mysqld` in foreground as PID 1.
+
+**WordPress**: the entrypoint waits for MariaDB to accept connections via `mysqladmin ping`, then uses `wp-cli` to download WordPress, generate `wp-config.php`, install the site, and create both user accounts on first launch. Subsequent starts skip initialization entirely since `wp-config.php` already exists.
+
+**NGINX**: the entrypoint generates a self-signed TLS certificate with `openssl`, substitutes `${DOMAIN_NAME}` into the nginx config via `envsubst`, then starts nginx in foreground with `daemon off`.
 
 ### Virtual Machines vs Docker
 
-A virtual machine virtualizes an entire computer, including its own kernel — it offers strong isolation but at the cost of size and startup time (gigabytes, minutes to boot). A Docker container shares the host's kernel and only packages the libraries and binaries the application needs — lightweight (megabytes) and fast to start (seconds or less).
+A virtual machine virtualizes an entire computer including its own kernel — strong isolation at the cost of gigabytes of disk and minutes to boot. A Docker container shares the host kernel and only packages the libraries the application needs — lightweight (megabytes) and fast to start (seconds).
 
-In this project, both are used together: the VM provides the overall machine isolation required by the subject, while Docker provides per-service isolation inside that VM — so that, for instance, a dependency update in the MariaDB container cannot break NGINX.
+In this project both are used together: the VM provides the overall machine isolation required by the subject, while Docker provides per-service isolation inside that VM — a dependency update in the MariaDB container cannot affect NGINX or WordPress.
 
 ### Secrets vs Environment Variables
 
-Environment variables (stored in `.env`) are used for non-sensitive configuration that can vary between environments — for example the domain name or database names. They are read by Docker Compose and injected into the containers' environment.
+Environment variables (stored in `.env`) hold non-sensitive configuration that varies between environments — domain name, database name, admin email. They are injected into containers by Docker Compose and are visible via `docker inspect`.
 
-Docker secrets are used for sensitive values — database passwords, the WordPress admin password. Unlike environment variables, secrets are mounted as files under `/run/secrets/` inside the container, with restricted access, and are never visible via `docker inspect` or `/proc/<pid>/environ`. Both `.env` and the `secrets/` directory are excluded from version control.
+Docker secrets hold sensitive values — database passwords, WordPress account passwords. Secrets are mounted as files under `/run/secrets/` inside the container with restricted permissions, and are never visible via `docker inspect` or `/proc/<pid>/environ`. Both `.env` and `secrets/` are excluded from version control via `.gitignore`.
 
 ### Docker Network vs Host Network
 
-Using `network: host` would make a container share the host's network stack directly — removing network isolation between containers and between the container and the host, and is explicitly forbidden by the subject (along with `--link` and `links:`).
+`network: host` makes a container share the host's network stack directly, removing all isolation between containers and exposing every port to the outside — it is explicitly forbidden by the subject (along with `--link` and `links:`).
 
-Instead, this project defines a custom bridge network (`inception`) in `docker-compose.yml`. Containers on this network can resolve each other by service name (e.g. WordPress reaches the database simply via the hostname `mariadb`), while remaining isolated from the host's network and from any container not on that network. Only NGINX exposes a port to the host (443).
+This project defines a custom bridge network (`inception`) in `docker-compose.yml`. Containers on this network resolve each other by service name (WordPress reaches MariaDB simply via the hostname `mariadb`), while remaining isolated from the host network and from containers not on that network. Only NGINX publishes a port to the host (443).
 
 ### Docker Volumes vs Bind Mounts
 
-A named volume is managed by Docker, which decides where the data is stored on the host. A bind mount instead maps a specific host directory directly into the container.
+A bind mount maps a specific host path directly into a container — simple and transparent, but tightly coupled to the host filesystem layout. A named volume is managed by Docker, appearing in `docker volume ls` with its own lifecycle independent of any container.
 
-This project uses bind mounts pointing to `/home/nnassiri/data/`, as required by the subject: one for the MariaDB data directory (`/var/lib/mysql`) and one for the WordPress files (`/var/www/html`). This makes the persisted data directly browsable on the host filesystem, and ensures data survives container restarts and rebuilds — at the cost of the data being tied to a specific host path rather than managed transparently by Docker.
+This project uses named volumes (`db_volume`, `wp_volume`) declared in `docker-compose.yml`. Docker stores their data under the configured `data-root` path (`/home/nnassiri/data/`), satisfying the subject's requirement that volume data be accessible at `/home/login/data` on the host machine, while keeping the volumes managed by Docker rather than raw bind mounts.
