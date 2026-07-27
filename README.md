@@ -11,7 +11,7 @@ The final stack is composed of three services:
 - **WordPress + php-fpm** — the application layer, executing the WordPress PHP code.
 - **MariaDB** — the database storing WordPress data.
 
-These services communicate over a dedicated Docker network, and persist their data through two volumes (database files and WordPress files) bind-mounted on the host.
+These services communicate over a dedicated Docker network, and persist their data through two volumes (database files and WordPress files).
 
 ## Instructions
 
